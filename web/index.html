@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>img2drawing</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- 標題列 -->
+    <header class="titlebar">
+      <span class="title-text">img2drawing</span>
+      <span id="status-badge" class="badge badge--idle">待機</span>
+    </header>
+
+    <div class="layout">
+
+      <!-- 左側：預覽區 + 前景提取 -->
+      <section class="preview-panel">
+
+        <!-- 預覽圖框（含 canvas 覆蓋層） -->
+        <div class="preview-box" id="preview-box">
+          <span class="preview-placeholder" id="preview-placeholder">尚未載入圖片</span>
+          <img id="preview-img" class="preview-img hidden" alt="預覽" />
+          <!-- 前景框選用 canvas，僅在框選模式下可互動 -->
+          <canvas id="fg-canvas" class="fg-canvas hidden"></canvas>
+        </div>
+
+        <div class="preview-info">
+          <span id="contour-count">輪廓數：—</span>
+        </div>
+
+        <button class="btn btn--primary btn--wide" id="btn-open">選擇圖片</button>
+        <div class="path-display" id="img-path">—</div>
+
+        <!-- 前景提取控制 -->
+        <div class="fg-bar">
+          <label class="toggle-label" id="fg-toggle-label" title="啟用後可在預覽圖上拖曳框選前景區域">
+            <input type="checkbox" id="fg-enable" />
+            <span>前景框選</span>
+          </label>
+          <button class="btn btn--sm btn--danger" id="btn-fg-clear" disabled title="清除前景提取，恢復原始圖片">清除</button>
+        </div>
+        <div id="fg-hint" class="hint hidden">在預覽圖上拖曳框選前景區域</div>
+        <div id="fg-status" class="hint fg-processing hidden">⏳ 前景提取中...</div>
+
+      </section>
+
+      <!-- 右側：參數面板 -->
+      <section class="params-panel">
+
+        <!-- 邊緣偵測 -->
+        <fieldset>
+          <legend>邊緣偵測</legend>
+          <div class="row">
+            <label>低閾值 <span id="val-thresh-low">50</span></label>
+            <input type="range" id="thresh-low" min="1" max="255" value="50" />
+          </div>
+          <div class="row">
+            <label>高閾值 <span id="val-thresh-high">150</span></label>
+            <input type="range" id="thresh-high" min="1" max="255" value="150" />
+          </div>
+          <div class="row">
+            <label>最短輪廓 <span id="val-min-len">10</span> px</label>
+            <input type="range" id="min-len" min="1" max="100" value="10" />
+          </div>
+        </fieldset>
+
+        <!-- 繪圖區域 -->
+        <fieldset>
+          <legend>繪圖區域避開（%）</legend>
+          <div class="grid2">
+            <div class="row"><label>左 <span id="val-avoid-left">0</span>%</label><input type="range" id="avoid-left" min="0" max="49" value="0" /></div>
+            <div class="row"><label>右 <span id="val-avoid-right">0</span>%</label><input type="range" id="avoid-right" min="0" max="49" value="0" /></div>
+            <div class="row"><label>上 <span id="val-avoid-top">0</span>%</label><input type="range" id="avoid-top" min="0" max="49" value="0" /></div>
+            <div class="row"><label>下 <span id="val-avoid-bottom">0</span>%</label><input type="range" id="avoid-bottom" min="0" max="49" value="0" /></div>
+          </div>
+        </fieldset>
+
+        <!-- 繪製起點 -->
+        <fieldset>
+          <legend>繪製起點</legend>
+          <div class="row checkbox-row">
+            <label title="啟用後以指定座標為圖片繪製中心，覆蓋避開邊距的自動居中">
+              <input type="checkbox" id="use-anchor" />
+              手動指定起點（覆蓋自動居中）
+            </label>
+          </div>
+          <div id="anchor-section" class="anchor-section hidden">
+            <div class="row">
+              <label>X 座標</label>
+              <input type="number" id="anchor-x" value="960" min="0" class="num-input" />
+            </div>
+            <div class="row">
+              <label>Y 座標</label>
+              <input type="number" id="anchor-y" value="540" min="0" class="num-input" />
+            </div>
+            <div class="row anchor-pick-row">
+              <button class="btn btn--secondary" id="btn-pick-pos">
+                移至目標位置後點此（3 s 後截取）
+              </button>
+              <span id="pick-countdown" class="pick-countdown"></span>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- 繪圖參數 -->
+        <fieldset>
+          <legend>繪圖參數</legend>
+          <div class="row">
+            <label>拖拽步長 <span id="val-drag-step">5</span> px</label>
+            <input type="range" id="drag-step" min="1" max="50" value="5" />
+          </div>
+          <div class="row">
+            <label>起落筆延遲 <span id="val-draw-delay">0.05</span> s</label>
+            <input type="range" id="draw-delay" min="2" max="100" value="5" />
+          </div>
+          <div class="row">
+            <label>繪圖按鍵</label>
+            <select id="draw-button">
+              <option value="right" selected>右鍵</option>
+              <option value="left">左鍵</option>
+            </select>
+          </div>
+          <div class="row checkbox-row">
+            <label>
+              <input type="checkbox" id="auto-align" checked />
+              暫停恢復時自動對齊
+            </label>
+          </div>
+        </fieldset>
+
+        <!-- 熱鍵設定 -->
+        <fieldset>
+          <legend>熱鍵</legend>
+          <div class="grid3">
+            <div class="row"><label>開始</label><input type="text" id="key-start" value="f8" class="key-input" /></div>
+            <div class="row"><label>暫停/繼續</label><input type="text" id="key-pause" value="f9" class="key-input" /></div>
+            <div class="row"><label>停止</label><input type="text" id="key-stop" value="f10" class="key-input" /></div>
+          </div>
+          <button class="btn btn--secondary" id="btn-apply-keys">套用熱鍵</button>
+        </fieldset>
+
+      </section>
+    </div>
+
+    <!-- 底部控制列 -->
+    <footer class="controlbar">
+      <button class="btn btn--success" id="btn-start">▶ 開始 (F8)</button>
+      <button class="btn btn--warning" id="btn-pause" disabled>⏸ 暫停 (F9)</button>
+      <button class="btn btn--danger" id="btn-stop" disabled>■ 停止 (F10)</button>
+      <div class="progress-wrap">
+        <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+      </div>
+      <span id="status-text">準備就緒</span>
+    </footer>
+
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
