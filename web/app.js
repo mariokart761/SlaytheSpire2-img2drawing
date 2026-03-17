@@ -10,9 +10,9 @@ function setStatus(text, badgeClass) {
   const badge = $('status-badge');
   badge.className = 'badge ' + badgeClass;
   const labels = {
-    'badge--idle': '待機',
+    'badge--idle':    '待機',
     'badge--drawing': '繪圖中',
-    'badge--paused': '暫停',
+    'badge--paused':  '暫停',
     'badge--stopped': '已停止',
   };
   badge.textContent = labels[badgeClass] ?? text;
@@ -27,43 +27,137 @@ function setProgress(done, total) {
 function setButtonState(drawing) {
   $('btn-start').disabled = drawing;
   $('btn-pause').disabled = !drawing;
-  $('btn-stop').disabled = !drawing;
+  $('btn-stop').disabled  = !drawing;
 }
+
+// ================================================================
+// 通用「checkbox 展開/收合 sub-params」工具
+// ================================================================
+function bindToggle(checkboxId, subParamsId) {
+  const cb  = $(checkboxId);
+  const sub = $(subParamsId);
+  cb.addEventListener('change', () => {
+    sub.classList.toggle('hidden', !cb.checked);
+    schedulePreviewUpdate();
+  });
+}
+
+bindToggle('use-clahe',          'clahe-params');
+bindToggle('use-bilateral',      'bilateral-params');
+bindToggle('use-median',         'median-params');
+bindToggle('use-morph-close',    'morph-close-params');
+bindToggle('use-morph-open',     'morph-open-params');
+bindToggle('use-region-filter',  'region-filter-params');
+bindToggle('use-approx',         'approx-params');
 
 // ================================================================
 // 滑桿綁定（即時顯示 + 防抖預覽更新）
 // ================================================================
 let previewTimer = null;
 
-function bindSlider(sliderId, displayId, transform) {
-  const slider = $(sliderId);
+function bindSlider(sliderId, displayId, transform, noPreview) {
+  const slider  = $(sliderId);
   const display = $(displayId);
   slider.addEventListener('input', () => {
     display.textContent = transform ? transform(slider.value) : slider.value;
-    schedulePreviewUpdate();
+    if (!noPreview) schedulePreviewUpdate();
   });
 }
 
 function schedulePreviewUpdate() {
   clearTimeout(previewTimer);
-  previewTimer = setTimeout(refreshPreview, 300);
+  previewTimer = setTimeout(refreshPreview, 350);
 }
 
-bindSlider('thresh-low',   'val-thresh-low',   v => v);
-bindSlider('thresh-high',  'val-thresh-high',  v => v);
-bindSlider('min-len',      'val-min-len',       v => v);
-bindSlider('avoid-left',   'val-avoid-left',   v => v);
-bindSlider('avoid-right',  'val-avoid-right',  v => v);
-bindSlider('avoid-top',    'val-avoid-top',    v => v);
-bindSlider('avoid-bottom', 'val-avoid-bottom', v => v);
-bindSlider('drag-step',    'val-drag-step',    v => v);
-bindSlider('draw-delay',   'val-draw-delay',   v => (v / 100).toFixed(2));
+// 邊緣偵測
+bindSlider('thresh-low',          'val-thresh-low',          v => v);
+bindSlider('thresh-high',         'val-thresh-high',         v => v);
+// 前處理：CLAHE
+bindSlider('clahe-clip',          'val-clahe-clip',          v => (v / 10).toFixed(1));
+// 前處理：bilateral / median
+bindSlider('bilateral-sigma',     'val-bilateral-sigma',     v => v);
+bindSlider('median-ksize',        'val-median-ksize',        v => v);
+// 形態學
+bindSlider('morph-close-ksize',   'val-morph-close-ksize',   v => v);
+bindSlider('morph-open-ksize',    'val-morph-open-ksize',    v => v);
+// 分區域過濾
+bindSlider('region-split',        'val-region-split',        v => v);
+bindSlider('region-sigma',        'val-region-sigma',        v => v);
+bindSlider('region-thresh-low',   'val-region-thresh-low',   v => v);
+bindSlider('region-thresh-high',  'val-region-thresh-high',  v => v);
+// 輪廓過濾
+bindSlider('min-len',             'val-min-len',             v => v);
+bindSlider('min-area',            'val-min-area',            v => v);
+bindSlider('approx-eps',          'val-approx-eps',          v => v);
+// 繪圖（不觸發預覽更新）
+bindSlider('avoid-left',          'val-avoid-left',          v => v,    true);
+bindSlider('avoid-right',         'val-avoid-right',         v => v,    true);
+bindSlider('avoid-top',           'val-avoid-top',           v => v,    true);
+bindSlider('avoid-bottom',        'val-avoid-bottom',        v => v,    true);
+bindSlider('drag-step',           'val-drag-step',           v => v,    true);
+bindSlider('draw-delay',          'val-draw-delay',          v => (v / 100).toFixed(2), true);
+
+// ================================================================
+// 收集所有影像處理參數（交給 update_preview / load_image）
+// ================================================================
+function gatherProcessingParams() {
+  return {
+    // Canny
+    threshold_low:            parseInt($('thresh-low').value),
+    threshold_high:           parseInt($('thresh-high').value),
+    // CLAHE
+    use_clahe:                $('use-clahe').checked,
+    clahe_clip:               parseInt($('clahe-clip').value) / 10,
+    // Bilateral / Median
+    use_bilateral:            $('use-bilateral').checked,
+    bilateral_sigma:          parseInt($('bilateral-sigma').value),
+    use_median:               $('use-median').checked,
+    median_ksize:             parseInt($('median-ksize').value),
+    // Morphology
+    use_morph_close:          $('use-morph-close').checked,
+    morph_close_ksize:        parseInt($('morph-close-ksize').value),
+    use_morph_open:           $('use-morph-open').checked,
+    morph_open_ksize:         parseInt($('morph-open-ksize').value),
+    // Thinning
+    use_thinning:             $('use-thinning').checked,
+    // Region filter
+    use_region_filter:        $('use-region-filter').checked,
+    region_split_pct:         parseInt($('region-split').value),
+    region_lower_sigma:       parseInt($('region-sigma').value),
+    region_lower_thresh_low:  parseInt($('region-thresh-low').value),
+    region_lower_thresh_high: parseInt($('region-thresh-high').value),
+    // Contour filter
+    min_length:               parseInt($('min-len').value),
+    min_area:                 parseInt($('min-area').value),
+    // D-P
+    use_approx:               $('use-approx').checked,
+    approx_epsilon_ppm:       parseInt($('approx-eps').value),
+  };
+}
+
+// 收集繪圖執行參數
+function gatherDrawParams() {
+  const params = {
+    avoid_left:   parseInt($('avoid-left').value)  / 100,
+    avoid_right:  parseInt($('avoid-right').value) / 100,
+    avoid_top:    parseInt($('avoid-top').value)   / 100,
+    avoid_bottom: parseInt($('avoid-bottom').value)/ 100,
+    drag_step:    parseInt($('drag-step').value),
+    draw_delay:   parseInt($('draw-delay').value)  / 100,
+    draw_button:  $('draw-button').value,
+  };
+  if ($('use-anchor').checked && anchorX !== null && anchorY !== null) {
+    params.anchor_x = anchorX;
+    params.anchor_y = anchorY;
+  }
+  return params;
+}
 
 // ================================================================
 // 圖片選擇與預覽
 // ================================================================
-let imgNatW = 0;   // 原始圖片寬（由 API 回傳）
-let imgNatH = 0;   // 原始圖片高
+let imgNatW = 0;
+let imgNatH = 0;
 
 $('btn-open').addEventListener('click', async () => {
   const result = await window.pywebview.api.open_file_dialog();
@@ -73,18 +167,12 @@ $('btn-open').addEventListener('click', async () => {
 });
 
 async function loadAndPreview(path) {
-  const resp = await window.pywebview.api.load_image(
-    path,
-    parseInt($('thresh-low').value),
-    parseInt($('thresh-high').value),
-    parseInt($('min-len').value),
-  );
+  const resp = await window.pywebview.api.load_image(path, gatherProcessingParams());
   if (!resp.ok) { alert('載入失敗：' + resp.error); return; }
   imgNatW = resp.img_w || 0;
   imgNatH = resp.img_h || 0;
   updatePreviewUI(resp);
 
-  // 前景提取開啟中需重置
   if ($('fg-enable').checked) {
     $('fg-enable').checked = false;
     toggleFgMode(false);
@@ -94,11 +182,7 @@ async function loadAndPreview(path) {
 
 async function refreshPreview() {
   if ($('img-path').textContent === '—') return;
-  const resp = await window.pywebview.api.update_preview(
-    parseInt($('thresh-low').value),
-    parseInt($('thresh-high').value),
-    parseInt($('min-len').value),
-  );
+  const resp = await window.pywebview.api.update_preview(gatherProcessingParams());
   if (resp && resp.ok) updatePreviewUI(resp);
 }
 
@@ -113,35 +197,26 @@ function updatePreviewUI(resp) {
 // ================================================================
 // 前景提取 — canvas 框選邏輯
 // ================================================================
-let fgMode = false;        // 是否在框選模式
+let fgMode     = false;
 let fgDragging = false;
-let fgStartX = 0, fgStartY = 0;
+let fgStartX   = 0, fgStartY = 0;
 
 const fgCanvas = $('fg-canvas');
-const ctx = fgCanvas.getContext('2d');
+const ctx      = fgCanvas.getContext('2d');
 
-/**
- * 回傳預覽圖在 canvas 中的實際渲染矩形（含 letterbox 偏移）。
- * 依據 preview-img naturalWidth/Height 計算 object-fit: contain 的邊界。
- */
 function getImgRectInCanvas() {
-  const box = $('preview-box');
+  const box  = $('preview-box');
   const boxW = box.clientWidth;
   const boxH = box.clientHeight;
   const img  = $('preview-img');
   const natW = img.naturalWidth  || boxW;
   const natH = img.naturalHeight || boxH;
   const scale = Math.min(boxW / natW, boxH / natH);
-  const dispW = natW * scale;
-  const dispH = natH * scale;
   return {
-    left:   (boxW - dispW) / 2,
-    top:    (boxH - dispH) / 2,
-    width:  dispW,
-    height: dispH,
-    // 縮略圖 → 原始圖片的比例
-    scaleX: imgNatW / natW,
-    scaleY: imgNatH / natH,
+    left:   (boxW - natW * scale) / 2,
+    top:    (boxH - natH * scale) / 2,
+    width:   natW * scale,
+    height:  natH * scale,
   };
 }
 
@@ -153,15 +228,11 @@ function syncCanvasSize() {
 
 function drawSelectionRect(x0, y0, x1, y1) {
   ctx.clearRect(0, 0, fgCanvas.width, fgCanvas.height);
-  const rx = Math.min(x0, x1);
-  const ry = Math.min(y0, y1);
-  const rw = Math.abs(x1 - x0);
-  const rh = Math.abs(y1 - y0);
-  // 半透明遮罩：框外暗化
+  const rx = Math.min(x0, x1), ry = Math.min(y0, y1);
+  const rw = Math.abs(x1 - x0), rh = Math.abs(y1 - y0);
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
   ctx.fillRect(0, 0, fgCanvas.width, fgCanvas.height);
   ctx.clearRect(rx, ry, rw, rh);
-  // 框線
   ctx.strokeStyle = '#4f9cf9';
   ctx.lineWidth = 2;
   ctx.setLineDash([5, 3]);
@@ -188,50 +259,39 @@ fgCanvas.addEventListener('mouseup', async e => {
   if (!fgDragging) return;
   fgDragging = false;
 
-  const r = fgCanvas.getBoundingClientRect();
+  const r   = fgCanvas.getBoundingClientRect();
   const endX = e.clientX - r.left;
   const endY = e.clientY - r.top;
 
-  const imgRect = getImgRectInCanvas();
-  // 轉換到縮略圖座標（去掉 letterbox）
-  const rx0 = (Math.min(fgStartX, endX) - imgRect.left) / imgRect.width;
-  const ry0 = (Math.min(fgStartY, endY) - imgRect.top)  / imgRect.height;
-  const rx1 = (Math.max(fgStartX, endX) - imgRect.left) / imgRect.width;
-  const ry1 = (Math.max(fgStartY, endY) - imgRect.top)  / imgRect.height;
+  const ir  = getImgRectInCanvas();
+  const nx  = Math.max(0, Math.min((Math.min(fgStartX, endX) - ir.left) / ir.width, 1));
+  const ny  = Math.max(0, Math.min((Math.min(fgStartY, endY) - ir.top)  / ir.height, 1));
+  const nx2 = Math.max(0, Math.min((Math.max(fgStartX, endX) - ir.left) / ir.width, 1));
+  const ny2 = Math.max(0, Math.min((Math.max(fgStartY, endY) - ir.top)  / ir.height, 1));
 
-  // 夾緊到 [0, 1]
-  const nx = Math.max(0, Math.min(rx0, 1));
-  const ny = Math.max(0, Math.min(ry0, 1));
-  const nw = Math.max(0, Math.min(rx1, 1)) - nx;
-  const nh = Math.max(0, Math.min(ry1, 1)) - ny;
-
-  if (nw < 0.02 || nh < 0.02) {
+  if (nx2 - nx < 0.02 || ny2 - ny < 0.02) {
     ctx.clearRect(0, 0, fgCanvas.width, fgCanvas.height);
     return;
   }
 
-  // 顯示處理中
   $('fg-status').classList.remove('hidden');
   $('fg-hint').classList.add('hidden');
 
-  const resp = await window.pywebview.api.set_foreground_rect(nx, ny, nw, nh);
+  const resp = await window.pywebview.api.set_foreground_rect(nx, ny, nx2 - nx, ny2 - ny);
   if (!resp.ok) {
     alert('前景提取失敗：' + resp.error);
     $('fg-status').classList.add('hidden');
     $('fg-hint').classList.remove('hidden');
     ctx.clearRect(0, 0, fgCanvas.width, fgCanvas.height);
   }
-  // 成功結果由 onForegroundDone 事件處理
 });
 
-/** 切換前景框選模式 */
 function toggleFgMode(enable) {
   fgMode = enable;
   if (enable) {
     syncCanvasSize();
     fgCanvas.classList.remove('hidden');
     fgCanvas.classList.add('fg-active');
-    // 顯示彩色原圖供框選
     window.pywebview.api.get_original_preview().then(resp => {
       if (resp.ok) {
         $('preview-img').src = resp.original_preview;
@@ -248,16 +308,12 @@ function toggleFgMode(enable) {
     ctx.clearRect(0, 0, fgCanvas.width, fgCanvas.height);
     $('fg-hint').classList.add('hidden');
     $('fg-status').classList.add('hidden');
-    // 恢復邊緣預覽
     refreshPreview();
   }
 }
 
 $('fg-enable').addEventListener('change', e => {
-  if ($('img-path').textContent === '—') {
-    e.target.checked = false;
-    return;
-  }
+  if ($('img-path').textContent === '—') { e.target.checked = false; return; }
   toggleFgMode(e.target.checked);
 });
 
@@ -277,7 +333,6 @@ window.addEventListener('onForegroundDone', e => {
   $('fg-status').classList.add('hidden');
   updatePreviewUI(e.detail);
   $('btn-fg-clear').disabled = false;
-  // 框選完成後退出框選模式，顯示邊緣預覽
   $('fg-enable').checked = false;
   toggleFgMode(false);
 });
@@ -292,19 +347,13 @@ window.addEventListener('onForegroundError', e => {
 // ================================================================
 // 繪製起點選取
 // ================================================================
-let anchorX = null;
-let anchorY = null;
+let anchorX      = null;
+let anchorY      = null;
 let pickingActive = false;
 
 $('use-anchor').addEventListener('change', e => {
-  const section = $('anchor-section');
-  if (e.target.checked) {
-    section.classList.remove('hidden');
-  } else {
-    section.classList.add('hidden');
-    anchorX = null;
-    anchorY = null;
-  }
+  $('anchor-section').classList.toggle('hidden', !e.target.checked);
+  if (!e.target.checked) { anchorX = null; anchorY = null; }
 });
 
 $('btn-pick-pos').addEventListener('click', async () => {
@@ -312,14 +361,7 @@ $('btn-pick-pos').addEventListener('click', async () => {
   pickingActive = true;
   $('btn-pick-pos').disabled = true;
   $('pick-countdown').textContent = '...';
-
-  const resp = await window.pywebview.api.start_pick_position(3);
-  if (!resp.ok) {
-    pickingActive = false;
-    $('btn-pick-pos').disabled = false;
-    $('pick-countdown').textContent = '';
-  }
-  // 結果由 onPickCountdown / onPickDone 事件推送
+  await window.pywebview.api.start_pick_position(3);
 });
 
 window.addEventListener('onPickCountdown', e => {
@@ -337,7 +379,6 @@ window.addEventListener('onPickDone', e => {
   $('btn-pick-pos').disabled = false;
 });
 
-// 手動修改 X/Y 輸入框也更新 anchor
 $('anchor-x').addEventListener('change', () => { anchorX = parseInt($('anchor-x').value) || null; });
 $('anchor-y').addEventListener('change', () => { anchorY = parseInt($('anchor-y').value) || null; });
 
@@ -345,7 +386,7 @@ $('anchor-y').addEventListener('change', () => { anchorY = parseInt($('anchor-y'
 // 繪圖控制按鈕
 // ================================================================
 $('btn-start').addEventListener('click', async () => {
-  const params = gatherParams();
+  const params = gatherDrawParams();
   const resp = await window.pywebview.api.start_drawing(params);
   if (!resp.ok) { alert('啟動失敗：' + resp.error); return; }
   setStatus('繪圖中', 'badge--drawing');
@@ -360,8 +401,7 @@ $('btn-pause').addEventListener('click', async () => {
     $('btn-pause').textContent = '▶ 繼續 (F9)';
     setStatus('已暫停', 'badge--paused');
   } else if (state === 'PAUSED') {
-    const autoAlign = $('auto-align').checked;
-    await window.pywebview.api.resume_drawing(autoAlign);
+    await window.pywebview.api.resume_drawing($('auto-align').checked);
     $('btn-pause').textContent = '⏸ 暫停 (F9)';
     setStatus('繪圖中', 'badge--drawing');
   }
@@ -376,34 +416,15 @@ $('btn-stop').addEventListener('click', async () => {
 // 熱鍵套用
 // ================================================================
 $('btn-apply-keys').addEventListener('click', async () => {
-  const ks = $('key-start').value.trim();
-  const kp = $('key-pause').value.trim();
-  const kt = $('key-stop').value.trim();
-  const resp = await window.pywebview.api.update_hotkeys(ks, kp, kt);
+  const resp = await window.pywebview.api.update_hotkeys(
+    $('key-start').value.trim(),
+    $('key-pause').value.trim(),
+    $('key-stop').value.trim(),
+  );
   if (resp.ok) {
     alert(`熱鍵已更新：開始=${resp.keys.start}  暫停=${resp.keys.pause}  停止=${resp.keys.stop}`);
   }
 });
-
-// ================================================================
-// 收集所有參數
-// ================================================================
-function gatherParams() {
-  const params = {
-    avoid_left:   parseInt($('avoid-left').value) / 100,
-    avoid_right:  parseInt($('avoid-right').value) / 100,
-    avoid_top:    parseInt($('avoid-top').value) / 100,
-    avoid_bottom: parseInt($('avoid-bottom').value) / 100,
-    drag_step:    parseInt($('drag-step').value),
-    draw_delay:   parseInt($('draw-delay').value) / 100,
-    draw_button:  $('draw-button').value,
-  };
-  if ($('use-anchor').checked && anchorX !== null && anchorY !== null) {
-    params.anchor_x = anchorX;
-    params.anchor_y = anchorY;
-  }
-  return params;
-}
 
 // ================================================================
 // 重置 UI
@@ -428,24 +449,16 @@ window.addEventListener('onDrawingFinished', () => {
   $('progress-bar').style.width = '100%';
 });
 
-window.addEventListener('onHotkeyStart', () => {
-  $('btn-start').click();
-});
-
-window.addEventListener('onHotkeyPause', () => {
+window.addEventListener('onHotkeyStart',  () => { $('btn-start').click(); });
+window.addEventListener('onHotkeyPause',  () => {
   $('btn-pause').textContent = '▶ 繼續 (F9)';
   setStatus('已暫停', 'badge--paused');
 });
-
 window.addEventListener('onHotkeyResume', () => {
   $('btn-pause').textContent = '⏸ 暫停 (F9)';
   setStatus('繪圖中', 'badge--drawing');
 });
-
-window.addEventListener('onHotkeyStop', () => {
-  resetUI();
-});
-
-window.addEventListener('onAlignFailed', () => {
+window.addEventListener('onHotkeyStop',   () => { resetUI(); });
+window.addEventListener('onAlignFailed',  () => {
   console.warn('自動對齊失敗，繼續以原座標繪圖');
 });

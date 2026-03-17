@@ -15,11 +15,11 @@ import webview
 from .state_machine import StateMachine
 from .image_processor import (
     load_image,
-    detect_edges,
-    extract_contours,
     extract_foreground,
     img_to_preview_b64,
-    edges_to_preview_b64,
+    contours_to_preview_b64,
+    process_image,
+    ProcessingParams,
 )
 from .path_optimizer import sort_contours_nearest
 from .drawer import CoordinateMapper, Drawer, MIN_DELAY
@@ -36,18 +36,16 @@ class DrawingAPI:
         self._hotkeys = HotkeyManager()
 
         # 原始圖片與前景提取結果
-        self._img = None            # 原始載入影像
-        self._img_fg = None         # GrabCut 前景提取後的影像（None 表示未啟用）
+        self._img = None
+        self._img_fg = None         # GrabCut 前景提取後的影像（None = 未啟用）
         self._img_path: str = ""
         self._img_w: int = 0
         self._img_h: int = 0
 
-        # 上次使用的邊緣偵測參數（供前景提取後重新計算）
-        self._last_thresh_low: int = 50
-        self._last_thresh_high: int = 150
-        self._last_min_len: int = 10
+        # 上次使用的處理參數（供前景提取後重新計算、及繼承預設值）
+        self._proc_params: ProcessingParams = ProcessingParams()
 
-        # 輪廓列表
+        # 輪廓列表（已排序）
         self._contours: list = []
 
         # 對齊用快照 / mapper
@@ -71,10 +69,9 @@ class DrawingAPI:
     # ------------------------------------------------------------------ #
 
     def open_file_dialog(self) -> dict[str, Any]:
-        """開啟檔案選擇對話框，回傳選取的路徑"""
         if self._window is None:
             return {"ok": False, "error": "window not ready"}
-        file_types = ("Image Files (*.jpg;*.jpeg;*.png;*.bmp)",)
+        file_types = ("Image Files (*.jpg;*.jpeg;*.png;*.bmp;*.webp)",)
         result = self._window.create_file_dialog(
             webview.OPEN_DIALOG, allow_multiple=False, file_types=file_types
         )
@@ -85,13 +82,11 @@ class DrawingAPI:
     def load_image(
         self,
         path: str,
-        threshold_low: int = 50,
-        threshold_high: int = 150,
-        min_length: int = 10,
+        params: Optional[dict] = None,
     ) -> dict[str, Any]:
         """
-        載入圖片，回傳邊緣預覽（base64）和圖片尺寸供前端使用。
-        同時清除舊的前景提取結果。
+        載入圖片，清除舊的前景提取結果，回傳預覽與尺寸。
+        params: 處理參數 dict（可省略，使用預設值）。
         """
         img = load_image(path)
         if img is None:
@@ -102,33 +97,29 @@ class DrawingAPI:
         self._img_path = path
         self._img_h, self._img_w = img.shape[:2]
 
-        resp = self.update_preview(threshold_low, threshold_high, min_length)
+        resp = self.update_preview(params or {})
         if resp["ok"]:
             resp["img_w"] = self._img_w
             resp["img_h"] = self._img_h
             resp["original_preview"] = img_to_preview_b64(img)
         return resp
 
-    def update_preview(
-        self,
-        threshold_low: int,
-        threshold_high: int,
-        min_length: int,
-    ) -> dict[str, Any]:
-        """重新計算邊緣並更新預覽（使用前景圖或原圖）"""
+    def update_preview(self, params: dict) -> dict[str, Any]:
+        """
+        以最新參數重新執行完整處理流水線並更新預覽。
+        預覽圖由實際輪廓繪製生成（所見即所繪）。
+        """
         if self._img is None:
             return {"ok": False, "error": "尚未載入圖片"}
 
-        self._last_thresh_low = int(threshold_low)
-        self._last_thresh_high = int(threshold_high)
-        self._last_min_len = int(min_length)
-
+        self._proc_params = ProcessingParams.from_dict(params)
         src = self._img_fg if self._img_fg is not None else self._img
-        edges = detect_edges(src, threshold_low, threshold_high)
-        self._contours = sort_contours_nearest(
-            extract_contours(edges, min_length)
+        _, contours = process_image(src, self._proc_params)
+        self._contours = sort_contours_nearest(contours)
+
+        preview = contours_to_preview_b64(
+            self._contours, self._img_w, self._img_h
         )
-        preview = edges_to_preview_b64(edges)
         return {
             "ok": True,
             "preview": preview,
@@ -173,17 +164,17 @@ class DrawingAPI:
         if pw < 5 or ph < 5:
             return {"ok": False, "error": "選取範圍太小，請圈選更大的區域"}
 
+        saved_params = self._proc_params
+
         def _worker() -> None:
             try:
                 fg = extract_foreground(self._img, (px, py, pw, ph))
                 self._img_fg = fg
-                edges = detect_edges(
-                    fg, self._last_thresh_low, self._last_thresh_high
+                _, contours = process_image(fg, saved_params)
+                self._contours = sort_contours_nearest(contours)
+                preview = contours_to_preview_b64(
+                    self._contours, img_w, img_h
                 )
-                self._contours = sort_contours_nearest(
-                    extract_contours(edges, self._last_min_len)
-                )
-                preview = edges_to_preview_b64(edges)
                 self._notify_ui("onForegroundDone", {
                     "preview": preview,
                     "contour_count": len(self._contours),
@@ -197,27 +188,22 @@ class DrawingAPI:
     def clear_foreground(self) -> dict[str, Any]:
         """清除前景提取結果，回到原始圖片"""
         self._img_fg = None
-        return self.update_preview(
-            self._last_thresh_low, self._last_thresh_high, self._last_min_len
-        )
+        return self.update_preview(self._proc_params.__dict__)
 
     # ------------------------------------------------------------------ #
     #  繪製起點選取
     # ------------------------------------------------------------------ #
 
     def start_pick_position(self, delay_sec: int = 3) -> dict[str, Any]:
-        """
-        倒數 delay_sec 秒後截取滑鼠位置作為繪製起點錨點。
-        進度透過 onPickCountdown / onPickDone 事件推送。
-        """
+        """倒數 delay_sec 秒後截取滑鼠位置作為繪製起點錨點"""
         delay_sec = max(1, int(delay_sec))
 
         def _worker() -> None:
             for remaining in range(delay_sec, 0, -1):
                 self._notify_ui("onPickCountdown", {"remaining": remaining})
                 time.sleep(1)
-            x, y = pyautogui.position()
-            self._notify_ui("onPickDone", {"x": int(x), "y": int(y)})
+            mx, my = pyautogui.position()
+            self._notify_ui("onPickDone", {"x": int(mx), "y": int(my)})
 
         threading.Thread(target=_worker, daemon=True).start()
         return {"ok": True}
@@ -234,7 +220,7 @@ class DrawingAPI:
           - drag_step                   : int (px)
           - draw_delay                  : float (s)
           - draw_button                 : "right" | "left"
-          - anchor_x / anchor_y        : int (螢幕像素，可選；設定後以此為繪圖中心)
+          - anchor_x / anchor_y        : int（可選，設定後以此為繪圖中心）
         """
         if self._img is None or not self._contours:
             return {"ok": False, "error": "請先載入圖片並確認輪廓不為空"}
@@ -291,7 +277,6 @@ class DrawingAPI:
         self._notify_ui("onDrawingFinished", {})
 
     def pause_drawing(self) -> dict[str, Any]:
-        """暫停繪圖，並拍攝對齊快照"""
         if self._state.pause():
             if self._img is not None and self._mapper is not None:
                 self._snapshot = align.take_snapshot(
@@ -301,7 +286,6 @@ class DrawingAPI:
         return {"ok": False, "error": "非繪圖中狀態"}
 
     def resume_drawing(self, auto_align: bool = True) -> dict[str, Any]:
-        """恢復繪圖；auto_align=True 時先執行自動對齊"""
         if not self._state.is_paused():
             return {"ok": False, "error": "非暫停狀態"}
 
@@ -316,7 +300,6 @@ class DrawingAPI:
         return {"ok": True}
 
     def stop_drawing(self) -> dict[str, Any]:
-        """強制停止"""
         self._state.stop()
         return {"ok": True}
 
@@ -327,7 +310,6 @@ class DrawingAPI:
     def update_hotkeys(
         self, key_start: str, key_pause: str, key_stop: str
     ) -> dict[str, Any]:
-        """更新全域熱鍵綁定"""
         self._hotkeys.register(
             on_start=self._on_hotkey_start,
             on_pause_resume=self._on_hotkey_pause_resume,
@@ -356,7 +338,6 @@ class DrawingAPI:
         self._notify_ui("onProgress", {"done": done, "total": total})
 
     def _notify_ui(self, event: str, data: dict) -> None:
-        """透過 CustomEvent 把資料推送到前端，使用 json.dumps 確保正確序列化"""
         if self._window is None:
             return
         try:
@@ -368,8 +349,6 @@ class DrawingAPI:
             self._window.evaluate_js(js)
         except Exception:
             pass
-
-    # -------- 熱鍵回呼 --------
 
     def _on_hotkey_start(self) -> None:
         if self._state.is_idle():

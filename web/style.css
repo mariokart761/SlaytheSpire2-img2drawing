@@ -173,6 +173,23 @@ input[type="text"]:focus, select:focus { border-color: var(--accent); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 
+/* ===== Sub-params (collapsible under checkbox toggles) ===== */
+.sub-params {
+  padding-left: 20px;
+  border-left: 2px solid var(--border);
+  margin-left: 2px;
+  overflow: hidden;
+  /* smooth show/hide via max-height */
+  max-height: 200px;
+  transition: max-height 0.2s ease, opacity 0.2s ease;
+  opacity: 1;
+}
+.sub-params.hidden {
+  max-height: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* ===== Foreground Extraction ===== */
 .fg-canvas {
   position: absolute; inset: 0;

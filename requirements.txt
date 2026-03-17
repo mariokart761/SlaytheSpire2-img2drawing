@@ -1,5 +1,7 @@
 pywebview>=4.4.1
-opencv-python>=4.9.0.80
+# opencv-contrib-python 包含 cv2.ximgproc.thinning，用於細線化
+# 注意：不可與 opencv-python 同時安裝，請先執行 pip uninstall opencv-python
+opencv-contrib-python>=4.9.0.80
 numpy>=1.26.4
 Pillow>=10.3.0
 pyautogui>=0.9.54

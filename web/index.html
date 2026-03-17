@@ -20,11 +20,9 @@
       <!-- 左側：預覽區 + 前景提取 -->
       <section class="preview-panel">
 
-        <!-- 預覽圖框（含 canvas 覆蓋層） -->
         <div class="preview-box" id="preview-box">
           <span class="preview-placeholder" id="preview-placeholder">尚未載入圖片</span>
           <img id="preview-img" class="preview-img hidden" alt="預覽" />
-          <!-- 前景框選用 canvas，僅在框選模式下可互動 -->
           <canvas id="fg-canvas" class="fg-canvas hidden"></canvas>
         </div>
 
@@ -35,13 +33,12 @@
         <button class="btn btn--primary btn--wide" id="btn-open">選擇圖片</button>
         <div class="path-display" id="img-path">—</div>
 
-        <!-- 前景提取控制 -->
         <div class="fg-bar">
-          <label class="toggle-label" id="fg-toggle-label" title="啟用後可在預覽圖上拖曳框選前景區域">
+          <label class="toggle-label" title="啟用後可在預覽圖上拖曳框選前景區域">
             <input type="checkbox" id="fg-enable" />
             <span>前景框選</span>
           </label>
-          <button class="btn btn--sm btn--danger" id="btn-fg-clear" disabled title="清除前景提取，恢復原始圖片">清除</button>
+          <button class="btn btn--sm btn--danger" id="btn-fg-clear" disabled>清除</button>
         </div>
         <div id="fg-hint" class="hint hidden">在預覽圖上拖曳框選前景區域</div>
         <div id="fg-status" class="hint fg-processing hidden">⏳ 前景提取中...</div>
@@ -51,9 +48,9 @@
       <!-- 右側：參數面板 -->
       <section class="params-panel">
 
-        <!-- 邊緣偵測 -->
+        <!-- ── 邊緣偵測 ─────────────────────── -->
         <fieldset>
-          <legend>邊緣偵測</legend>
+          <legend>邊緣偵測（Canny）</legend>
           <div class="row">
             <label>低閾值 <span id="val-thresh-low">50</span></label>
             <input type="range" id="thresh-low" min="1" max="255" value="50" />
@@ -62,13 +59,147 @@
             <label>高閾值 <span id="val-thresh-high">150</span></label>
             <input type="range" id="thresh-high" min="1" max="255" value="150" />
           </div>
-          <div class="row">
-            <label>最短輪廓 <span id="val-min-len">10</span> px</label>
-            <input type="range" id="min-len" min="1" max="100" value="10" />
+        </fieldset>
+
+        <!-- ── 前處理平滑 ───────────────────── -->
+        <fieldset>
+          <legend>前處理平滑</legend>
+
+          <div class="row checkbox-row">
+            <label title="CLAHE 局部對比增強：讓眼睛、鼻子、嘴巴的邊緣更容易被偵測到">
+              <input type="checkbox" id="use-clahe" checked />
+              CLAHE 局部對比增強
+            </label>
+          </div>
+          <div id="clahe-params" class="sub-params">
+            <div class="row">
+              <label>強度 <span id="val-clahe-clip">2.0</span></label>
+              <input type="range" id="clahe-clip" min="5" max="80" value="20" />
+            </div>
+          </div>
+
+          <div class="row checkbox-row">
+            <label title="保留大邊界的同時去除細碎紋理，對動漫圖效果極佳">
+              <input type="checkbox" id="use-bilateral" checked />
+              Bilateral 平滑（保邊去紋理）
+            </label>
+          </div>
+          <div id="bilateral-params" class="sub-params">
+            <div class="row">
+              <label>強度 <span id="val-bilateral-sigma">75</span></label>
+              <input type="range" id="bilateral-sigma" min="10" max="200" value="75" />
+            </div>
+          </div>
+
+          <div class="row checkbox-row">
+            <label title="去除小雜點，核大小越大效果越強但會模糊邊緣">
+              <input type="checkbox" id="use-median" />
+              Median 去雜點
+            </label>
+          </div>
+          <div id="median-params" class="sub-params hidden">
+            <div class="row">
+              <label>核大小 <span id="val-median-ksize">5</span></label>
+              <input type="range" id="median-ksize" min="3" max="15" step="2" value="5" />
+            </div>
           </div>
         </fieldset>
 
-        <!-- 繪圖區域 -->
+        <!-- ── 形態學後處理與細線化 ────────── -->
+        <fieldset>
+          <legend>形態學後處理與細線化</legend>
+
+          <div class="row checkbox-row">
+            <label title="把邊緣圖中的斷線接起來，讓輪廓更連續">
+              <input type="checkbox" id="use-morph-close" checked />
+              閉運算（連接斷線）
+            </label>
+          </div>
+          <div id="morph-close-params" class="sub-params">
+            <div class="row">
+              <label>核大小 <span id="val-morph-close-ksize">3</span></label>
+              <input type="range" id="morph-close-ksize" min="1" max="11" step="2" value="3" />
+            </div>
+          </div>
+
+          <div class="row checkbox-row">
+            <label title="去除邊緣圖中的細小孤立噪點">
+              <input type="checkbox" id="use-morph-open" />
+              開運算（去除噪點）
+            </label>
+          </div>
+          <div id="morph-open-params" class="sub-params hidden">
+            <div class="row">
+              <label>核大小 <span id="val-morph-open-ksize">3</span></label>
+              <input type="range" id="morph-open-ksize" min="1" max="11" step="2" value="3" />
+            </div>
+          </div>
+
+          <div class="row checkbox-row">
+            <label title="把粗邊緣壓縮成單像素中心線，根本解決「沿同一條線來回走」問題。需要 opencv-contrib-python">
+              <input type="checkbox" id="use-thinning" checked />
+              Thinning 細線化（解決來回走）
+            </label>
+          </div>
+        </fieldset>
+
+        <!-- ── 分區域過濾（人像用）──────────── -->
+        <fieldset>
+          <legend>分區域過濾（人像）</legend>
+          <div class="row checkbox-row">
+            <label title="上半部保留五官細節；下半部強力抑制衣物紋理、格紋陰影">
+              <input type="checkbox" id="use-region-filter" />
+              啟用分區過濾
+            </label>
+          </div>
+          <div id="region-filter-params" class="sub-params hidden">
+            <div class="row">
+              <label>分割線 <span id="val-region-split">58</span>%</label>
+              <input type="range" id="region-split" min="20" max="80" value="58" />
+            </div>
+            <div class="row">
+              <label>下半 Bilateral <span id="val-region-sigma">120</span></label>
+              <input type="range" id="region-sigma" min="30" max="250" value="120" />
+            </div>
+            <div class="row">
+              <label>下半低閾值 <span id="val-region-thresh-low">80</span></label>
+              <input type="range" id="region-thresh-low" min="1" max="255" value="80" />
+            </div>
+            <div class="row">
+              <label>下半高閾值 <span id="val-region-thresh-high">180</span></label>
+              <input type="range" id="region-thresh-high" min="1" max="255" value="180" />
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- ── 輪廓過濾與簡化 ──────────────── -->
+        <fieldset>
+          <legend>輪廓過濾與簡化</legend>
+
+          <div class="row">
+            <label>最短輪廓 <span id="val-min-len">10</span> pt</label>
+            <input type="range" id="min-len" min="1" max="200" value="10" />
+          </div>
+          <div class="row">
+            <label>最小面積 <span id="val-min-area">0</span> px²</label>
+            <input type="range" id="min-area" min="0" max="1000" value="0" />
+          </div>
+
+          <div class="row checkbox-row">
+            <label title="Douglas-Peucker 路徑簡化：減少點數、減少鋸齒，值越大越簡化">
+              <input type="checkbox" id="use-approx" checked />
+              D-P 路徑簡化
+            </label>
+          </div>
+          <div id="approx-params" class="sub-params">
+            <div class="row">
+              <label>簡化強度 <span id="val-approx-eps">2</span>‰</label>
+              <input type="range" id="approx-eps" min="1" max="50" value="2" />
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- ── 繪圖區域 ─────────────────────── -->
         <fieldset>
           <legend>繪圖區域避開（%）</legend>
           <div class="grid2">
@@ -79,7 +210,7 @@
           </div>
         </fieldset>
 
-        <!-- 繪製起點 -->
+        <!-- ── 繪製起點 ─────────────────────── -->
         <fieldset>
           <legend>繪製起點</legend>
           <div class="row checkbox-row">
@@ -106,7 +237,7 @@
           </div>
         </fieldset>
 
-        <!-- 繪圖參數 -->
+        <!-- ── 繪圖參數 ─────────────────────── -->
         <fieldset>
           <legend>繪圖參數</legend>
           <div class="row">
@@ -132,7 +263,7 @@
           </div>
         </fieldset>
 
-        <!-- 熱鍵設定 -->
+        <!-- ── 熱鍵設定 ─────────────────────── -->
         <fieldset>
           <legend>熱鍵</legend>
           <div class="grid3">
